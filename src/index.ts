@@ -1,33 +1,63 @@
-/**
- * Welcome to Cloudflare Workers!
- *
- * This is a template for a Scheduled Worker: a Worker that can run on a
- * configurable interval:
- * https://developers.cloudflare.com/workers/platform/triggers/cron-triggers/
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Run `curl "http://localhost:8787/__scheduled?cron=*+*+*+*+*"` to see your Worker in action
- * - Run `npm run deploy` to publish your Worker
- *
- * Bind resources to your Worker in `wrangler.json`. After adding bindings, a type definition for the
- * `Env` object can be regenerated with `npm run cf-typegen`.
- *
- * Learn more at https://developers.cloudflare.com/workers/
- */
+import { XMLParser } from 'fast-xml-parser';
+import { createRestAPIClient } from "masto";
+
+export interface Env {
+	COMMITS: KVNamespace;
+	GTS_URL: string;
+	GTS_TOKEN: string;
+}
+
+type Commit = {
+	id: string,
+	title: string,
+	author: string,
+	commit: string,
+	link: string
+};
 
 export default {
-	// The scheduled handler is invoked at the interval set in our wrangler.json's
-	// [[triggers]] configuration.
-	async scheduled(event, env, ctx): Promise<void> {
-		// A Cron Trigger can make requests to other endpoints on the Internet,
-		// publish to a Queue, query a D1 Database, and much more.
-		//
-		// We'll keep it simple and make an API call to a Cloudflare API:
-		let resp = await fetch('https://api.cloudflare.com/client/v4/ips');
-		let wasSuccessful = resp.ok ? 'success' : 'fail';
+	async scheduled(_event, env, _ctx): Promise<void> {
+		const resp = await fetch('https://github.com/superseriousbusiness/gotosocial/commits/main.atom');
+		const atom = await resp.text();
+		const parser = new XMLParser();
+		const feed = parser.parse(atom);
 
-		// You could store this result in KV, write to a D1 Database, or publish to a Queue.
-		// In this template, we'll just log the result:
-		console.log(`trigger fired at ${event.cron}: ${wasSuccessful}`);
+		// Collect recent commits.
+		const commits: Commit[] = feed.feed.entry.map((x: any) => {
+			const commit = x.id.split('/').slice(-1)[0];
+			return {
+				id: x.id,
+				// Replace hashtags so they don't link.
+				title: x.title.replace('\#', '\\\#'),
+				author: x.author.name,
+				commit: commit,
+				link: `https://github.com/superseriousbusiness/gotosocial/commit/${commit}`
+		}});
+
+
+		const posted = await env.COMMITS.list();
+		const existingIds = posted.keys.map((x) => x.name);
+		const filtered = commits.filter((commit) => {
+			return !existingIds.includes(commit.id);
+		});
+
+		const gtsClient = createRestAPIClient({
+			url: env.GTS_URL,
+			accessToken: env.GTS_TOKEN,
+			requestInit: {
+				headers: {
+					"User-Agent": "gts-merges worker",
+				},
+			},
+		});
+
+		for (const commit of filtered) {
+			const status = await gtsClient.v1.statuses.create({
+				status: `${commit.title} by ${commit.author} has been merged!\n\n[${commit.commit}](${commit.link})`,
+			});
+			await env.COMMITS.put(commit.id, status.id);
+			console.log(`Posted ${status.url} for ${commit.id}`);
+		}
+
 	},
 } satisfies ExportedHandler<Env>;
