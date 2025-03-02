@@ -4,4 +4,5 @@ interface Env {
 	COMMITS: KVNamespace;
 	GTS_URL: "https://botsinbox.net";
 	GTS_TOKEN: string;
+	MERGEBOT_WORKFLOW: Workflow;
 }
