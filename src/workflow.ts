@@ -3,10 +3,19 @@ import { Commit } from './types';
 import { XMLParser } from 'fast-xml-parser';
 import { createRestAPIClient } from 'masto';
 
+// const USER_AGENT = "botsinbox.net/@gts_merges (Cloudflare Worker)";
+const USER_AGENT = "curl/8.13.0" // TEMPORARY.
+const GITHUB_COMMIT_PREFIX = "tag:github.com,2008:Grit::Commit/";
+const CODEBERG_COMMIT_LINK = "https://codeberg.org/superseriousbusiness/gotosocial/commit/";
+
 export class MergebotWorkflow extends WorkflowEntrypoint<Env, Params> {
 	async run(_event: WorkflowEvent<any>, step: WorkflowStep) {
 		const resp = await step.do("fetch latest commits rss", async () => {
-			const resp = await fetch('https://github.com/superseriousbusiness/gotosocial/commits/main.atom');
+			const resp = await fetch('https://codeberg.org/superseriousbusiness/gotosocial/atom/branch/main', {
+					headers: {
+						"User-Agent": USER_AGENT
+					}
+				});
 			return await resp.text();
 		});
 
@@ -23,13 +32,16 @@ export class MergebotWorkflow extends WorkflowEntrypoint<Env, Params> {
 					title: x.title.replace('\#', '\\\#'),
 					author: x.author.name,
 					commit: commit,
-					link: `https://github.com/superseriousbusiness/gotosocial/commit/${commit}`
+					link: `${CODEBERG_COMMIT_LINK}${commit}`
 				}});
 		});
 
 		const filtered_commits = await step.do("filter existing posted commit ids", async () => {
 			const posted = await this.env.COMMITS.list();
-			const existingIds = posted.keys.map((x) => x.name);
+			const existingIds = posted.keys.map((x) =>
+				// GitHub prefixed commit IDs, but Codeberg does not, so we just drop it.
+				x.name.replace(GITHUB_COMMIT_PREFIX, '')
+			);
 			return commits.filter((commit) => {
 				return !existingIds.includes(commit.id);
 			});
@@ -41,7 +53,7 @@ export class MergebotWorkflow extends WorkflowEntrypoint<Env, Params> {
 				accessToken: this.env.GTS_TOKEN,
 				requestInit: {
 					headers: {
-						'User-Agent': 'gts-merges worker',
+						"User-Agent": USER_AGENT
 					},
 				},
 			});
