@@ -3,15 +3,15 @@ import { Commit } from './types';
 import { XMLParser } from 'fast-xml-parser';
 import { createRestAPIClient } from 'masto';
 
-// const USER_AGENT = "botsinbox.net/@gts_merges (Cloudflare Worker)";
-const USER_AGENT = "curl/8.13.0" // TEMPORARY.
+const USER_AGENT = "botsinbox.net/@gts_merges (Cloudflare Worker)";
 const GITHUB_COMMIT_PREFIX = "tag:github.com,2008:Grit::Commit/";
 const CODEBERG_COMMIT_LINK = "https://codeberg.org/superseriousbusiness/gotosocial/commit/";
+const ATOM_FEED = "https://github.com/superseriousbusiness/gotosocial/commits/main.atom";
 
 export class MergebotWorkflow extends WorkflowEntrypoint<Env, Params> {
 	async run(_event: WorkflowEvent<any>, step: WorkflowStep) {
 		const resp = await step.do("fetch latest commits rss", async () => {
-			const resp = await fetch('https://codeberg.org/superseriousbusiness/gotosocial/atom/branch/main', {
+			const resp = await fetch(ATOM_FEED, {
 					headers: {
 						"User-Agent": USER_AGENT
 					}
@@ -27,7 +27,7 @@ export class MergebotWorkflow extends WorkflowEntrypoint<Env, Params> {
 			return feed.feed.entry.map((x: any) => {
 				const commit = x.id.split('/').slice(-1)[0];
 				return {
-					id: x.id,
+					id: commit,
 					// Replace hashtags so they don't link.
 					title: x.title.replace('\#', '\\\#'),
 					author: x.author.name,
